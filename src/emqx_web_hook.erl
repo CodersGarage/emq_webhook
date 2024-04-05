@@ -17,6 +17,7 @@
 -module(emqx_web_hook).
 
 -include_lib("emqx/include/emqx.hrl").
+-include_lib("emqx/include/emqx_mqtt.hrl").
 -include_lib("emqx/include/logger.hrl").
 
 -define(APP, emqx_web_hook).
@@ -259,7 +260,7 @@ on_message_publish(Message = #message{topic = Topic}, {Filter}) ->
                   , payload => encode_payload(Message#message.payload)
                   , ts => Message#message.timestamp
                   },
-        send_http_request(FromClientId, Params),
+        send_http_request(FromClientId, parse_property(Message, Params)),
         {ok, Message}
       end, Message, Topic, Filter).
 
@@ -287,7 +288,7 @@ on_message_delivered(#{clientid := ClientId, username := Username},
                 , payload => encode_payload(Message#message.payload)
                 , ts => Message#message.timestamp
                 },
-      send_http_request(ClientId, Params)
+      send_http_request(ClientId, parse_property(Message, Params))
     end, Topic, Filter).
 
 %%--------------------------------------------------------------------
@@ -314,7 +315,7 @@ on_message_acked(#{clientid := ClientId, username := Username},
                   , payload => encode_payload(Message#message.payload)
                   , ts => Message#message.timestamp
                   },
-        send_http_request(ClientId, Params)
+        send_http_request(ClientId, parse_property(Message, Params))
       end, Topic, Filter).
 
 %%--------------------------------------------------------------------
@@ -369,6 +370,17 @@ with_filter(Fun, Msg, Topic, Filter) ->
 
 parse_from(Message) ->
     {emqx_message:from(Message), maybe(emqx_message:get_header(username, Message))}.
+
+parse_property(Message, Params) ->
+    case emqx_message:get_header(proto_ver, Message) of
+        ?MQTT_PROTO_V5 -> Properties = emqx_message:get_header(properties, Message),
+            Props = case maps:find('User-Property', Properties) of
+                {ok, UserProps} -> maps:update('User-Property', maps:from_list(UserProps), Properties);
+                error -> Properties
+            end,
+            maps:put(properties, Props, Params);
+        _ -> Params
+    end.
 
 encode_payload(Payload) ->
     encode_payload(Payload, application:get_env(?APP, encode_payload, undefined)).
